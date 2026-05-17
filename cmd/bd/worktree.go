@@ -48,6 +48,10 @@ func truncateForBox(path string, maxLen int) string {
 // warnMultipleDatabases prints a warning if multiple .beads databases exist
 // in the directory hierarchy, to prevent confusion and database pollution
 func warnMultipleDatabases(currentDB string) {
+	// gascity-fast: disabled. FindAllDatabases() walks the directory hierarchy
+	// on every command. We run with a single .beads — skip.
+	return
+
 	databases := beads.FindAllDatabases()
 	if len(databases) <= 1 {
 		return // Only one database found, no warning needed
