@@ -61,6 +61,10 @@ func initTipRand() {
 // maybeShowTip selects and displays an eligible tip based on priority and probability
 // Respects --json and --quiet flags
 func maybeShowTip(store storage.DoltStorage) {
+	// gascity-fast: disabled. Called from create/list/show/ready; selectNextTip
+	// queries DB metadata for each tip's last_shown timestamp. We don't need tips.
+	return
+
 	// Skip tips in JSON output mode or quiet mode
 	if jsonOutput || quietFlag {
 		return
