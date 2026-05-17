@@ -24,6 +24,9 @@ func isBackupAutoEnabled() bool {
 // maybeAutoBackup runs a Dolt-native backup if enabled and the throttle interval has passed.
 // Called from PersistentPostRun after auto-commit.
 func maybeAutoBackup(ctx context.Context) {
+	// gascity-fast: disabled. Use `bd backup sync` for explicit on-demand backup.
+	return
+
 	// Skip backup entirely when running as a git hook (post-checkout, post-merge, etc.).
 	// Git hooks call 'bd hooks run' which goes through PersistentPostRun — without this
 	// guard, every git checkout/merge/rebase triggers a backup on the current branch.
