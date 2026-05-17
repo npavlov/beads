@@ -9,7 +9,7 @@ SHELL := $(subst cmd,bin,$(subst git.exe,bash.exe,$(GIT_BASH)))
 endif
 endif
 
-.PHONY: all build test test-icu-path test-full-cgo test-regression test-upgrade test-cross-version test-migration bench bench-quick clean install install-force help check-up-to-date fmt fmt-check
+.PHONY: all build gascity-fast-build test test-icu-path test-full-cgo test-regression test-upgrade test-cross-version test-migration bench bench-quick clean install install-force help check-up-to-date fmt fmt-check
 
 # Default target
 all: build
@@ -60,6 +60,34 @@ ifeq ($(shell uname),Darwin)
 	@echo "Signed bd for macOS"
 endif
 endif
+
+# Build + install the gascity-fast variant. Stamps the version as
+# 1.0.4-fast-<tag> so `bd --version` distinguishes our patched binary
+# from upstream. Default install location is /opt/homebrew/bin/bd-main
+# (override with FAST_INSTALL_DIR=...). Bump the version tag manually
+# via FAST_TAG=v8.
+#
+# Usage:
+#   make gascity-fast-build                     # default tag v7
+#   make gascity-fast-build FAST_TAG=v8         # bump tag
+#   make gascity-fast-build FAST_INSTALL_DIR=~/.local/bin
+FAST_BASE_VERSION ?= 1.0.4-fast
+FAST_TAG ?= v7
+FAST_INSTALL_DIR ?= /opt/homebrew/bin
+FAST_BINARY_NAME ?= bd-main
+gascity-fast-build:
+	@echo "Building $(FAST_BASE_VERSION)-$(FAST_TAG) ($(GIT_BUILD))..."
+	CGO_ENABLED=1 GOTOOLCHAIN=auto go build \
+	  -tags "$(BUILD_TAGS)" \
+	  -ldflags="-X main.Version=$(FAST_BASE_VERSION)-$(FAST_TAG) -X main.Build=$(GIT_BUILD)" \
+	  -o $(BUILD_DIR)/bd ./cmd/bd
+ifeq ($(shell uname),Darwin)
+	@codesign -s - -f $(BUILD_DIR)/bd 2>/dev/null || true
+endif
+	@mkdir -p $(FAST_INSTALL_DIR)
+	@cp $(BUILD_DIR)/bd $(FAST_INSTALL_DIR)/$(FAST_BINARY_NAME)
+	@echo "Installed: $(FAST_INSTALL_DIR)/$(FAST_BINARY_NAME)"
+	@$(FAST_INSTALL_DIR)/$(FAST_BINARY_NAME) --version
 
 # Run all tests (skips known broken tests listed in .test-skip)
 test:
