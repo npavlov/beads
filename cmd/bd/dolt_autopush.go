@@ -103,6 +103,10 @@ func pushWithContext(ctx context.Context, target autoPushTarget) error {
 // maybeAutoPush pushes to the Dolt remote if enabled and the debounce interval has passed.
 // Called from PersistentPostRun after auto-commit and auto-backup.
 func maybeAutoPush(ctx context.Context) {
+	// gascity-fast: hardcoded off. No matter what `dolt.auto-push` config says,
+	// never push to a remote. Use `bd dolt push` explicitly if you really want.
+	return
+
 	if isSandboxMode() {
 		debug.Logf("dolt auto-push: skipped (sandbox mode)\n")
 		return

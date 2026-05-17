@@ -5,8 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	"github.com/steveyegge/beads/internal/config"
 )
 
 // resolveSyncRemote returns the effective sync remote URL.
@@ -15,20 +13,19 @@ import (
 //  2. sync.git-remote (deprecated fallback)
 //  3. "" (not configured)
 func resolveSyncRemote() string {
-	if v := config.GetString("sync.remote"); v != "" {
-		return v
-	}
-	return config.GetString("sync.git-remote")
+	// gascity-fast: hardcoded empty. We don't sync beads through a remote on
+	// this binary. Pretend sync.remote is never configured so bootstrap,
+	// hooks, and auto-push paths all take the no-remote branch regardless
+	// of what's in .beads/config.yaml.
+	return ""
 }
 
 // resolveSyncRemoteFromDir is like resolveSyncRemote but reads from a
 // specific beads directory's config.yaml. Used by context_cmd, doctor,
 // and other paths that operate on a resolved beads dir rather than CWD.
 func resolveSyncRemoteFromDir(beadsDir string) string {
-	if v := config.GetStringFromDir(beadsDir, "sync.remote"); v != "" {
-		return v
-	}
-	return config.GetStringFromDir(beadsDir, "sync.git-remote")
+	// gascity-fast: hardcoded empty (see resolveSyncRemote).
+	return ""
 }
 
 // commitBeadsConfig stages .beads/config.yaml and commits it.
