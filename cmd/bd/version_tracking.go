@@ -24,6 +24,10 @@ const localVersionFile = ".local_version"
 // This function is best-effort - failures are silent to avoid disrupting commands.
 // Sets global variables versionUpgradeDetected and previousVersion if upgrade detected.
 func trackBdVersion() {
+	// gascity-fast: disabled. We pin a custom binary; version upgrade tracking
+	// is moot. Skips per-command FindBeadsDir + .local_version read/write.
+	return
+
 	// Find the beads directory
 	beadsDir := beads.FindBeadsDir()
 	if beadsDir == "" {

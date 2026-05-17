@@ -452,14 +452,8 @@ func getActorWithGit() string {
 		return bdActor
 	}
 
-	// Try git config user.name - the natural default for a git-native tool
-	if out, err := exec.Command("git", "config", "user.name").Output(); err == nil {
-		if gitUser := strings.TrimSpace(string(out)); gitUser != "" {
-			return gitUser
-		}
-	}
-
-	// Fall back to system username
+	// gascity-fast: skipped `git config user.name` subprocess (~50-100ms per
+	// command on macOS). Fall through to USER. Set BEADS_ACTOR to override.
 	if user := os.Getenv("USER"); user != "" {
 		return user
 	}
@@ -1251,6 +1245,10 @@ func flushBatchCommitOnShutdown() {
 // 2. The check requires an open store connection
 // 3. New databases won't have _project_id yet (bootstrap case)
 func validateWorkspaceIdentity(ctx context.Context, beadsDir string) {
+	// gascity-fast: disabled. Fires GetMetadata DB read on every write command.
+	// Single-project setup, identity drift won't happen here.
+	return
+
 	if store == nil {
 		return // No store connection, nothing to validate
 	}
