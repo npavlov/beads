@@ -201,11 +201,11 @@ func (h *HookFiringStore) fireHookByID(ctx context.Context, event, id string) {
 	if h.runner == nil {
 		return
 	}
-	issue, err := h.inner.GetIssue(ctx, id)
-	if err != nil {
-		return // best-effort: skip hook if re-fetch fails
-	}
-	h.runner.Run(event, issue)
+	// gascity-fast: skip the post-mutation GetIssue re-fetch (1 DB roundtrip
+	// per write command). Pass a minimal stub. Hook scripts that need full
+	// state can `bd show $1 --json` themselves. Trade: hooks lose `title` and
+	// other body fields from stdin payload.
+	h.runner.Run(event, &types.Issue{ID: id})
 }
 
 // ── Hook tracking transaction ───────────────────────────────────────
