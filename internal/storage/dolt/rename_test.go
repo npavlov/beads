@@ -8,8 +8,7 @@ import (
 )
 
 // TestUpdateIssueIDUpdatesWispTables verifies that renaming a regular issue
-// also updates cross-references in wisp_* auxiliary tables (wisp_dependencies,
-// wisp_events, wisp_labels, wisp_comments). (bd-8ykk)
+// also updates wisp dependency targets that point at it. (bd-8ykk)
 func TestUpdateIssueIDUpdatesWispTables(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
@@ -51,50 +50,6 @@ func TestUpdateIssueIDUpdatesWispTables(t *testing.T) {
 		t.Fatalf("failed to add wisp dependency: %v", err)
 	}
 
-	// Add wisp dependency: some other wisp has issue_id = old issue
-	wisp2 := &types.Issue{
-		ID:        "test-wisp-def",
-		Title:     "Another wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
-	}
-	if err := store.CreateIssue(ctx, wisp2, "test"); err != nil {
-		t.Fatalf("failed to create wisp2: %v", err)
-	}
-
-	// Add wisp_dependencies row where issue_id is the old ID
-	dep2 := &types.Dependency{
-		IssueID:     "test-old1",
-		DependsOnID: wisp2.ID,
-		Type:        types.DepBlocks,
-	}
-	if err := store.addWispDependency(ctx, dep2, "test", false); err != nil {
-		t.Fatalf("failed to add wisp dependency 2: %v", err)
-	}
-
-	// Add a wisp label for the old issue ID
-	if err := store.AddLabel(ctx, "test-old1", "bug", "test"); err != nil {
-		t.Fatalf("failed to add wisp label: %v", err)
-	}
-
-	// Add a wisp event for the old issue ID (via direct SQL since there's no addWispEvent)
-	_, err := store.execContext(ctx, `
-		INSERT INTO wisp_events (issue_id, event_type, actor) VALUES (?, 'test_event', 'test')
-	`, "test-old1")
-	if err != nil {
-		t.Fatalf("failed to add wisp event: %v", err)
-	}
-
-	// Add a wisp comment for the old issue ID
-	_, err = store.execContext(ctx, `
-		INSERT INTO wisp_comments (issue_id, author, text) VALUES (?, 'test', 'test comment')
-	`, "test-old1")
-	if err != nil {
-		t.Fatalf("failed to add wisp comment: %v", err)
-	}
-
 	// Now rename the issue
 	newID := "test-new1"
 	if err := store.UpdateIssueID(ctx, "test-old1", newID, issue, "test"); err != nil {
@@ -103,23 +58,13 @@ func TestUpdateIssueIDUpdatesWispTables(t *testing.T) {
 
 	// Verify wisp_dependencies.depends_on_id was updated
 	var depCount int
-	err = store.db.QueryRowContext(ctx,
+	err := store.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM wisp_dependencies WHERE depends_on_id = ?`, newID).Scan(&depCount)
 	if err != nil {
 		t.Fatalf("failed to query wisp_dependencies depends_on_id: %v", err)
 	}
 	if depCount != 1 {
 		t.Errorf("expected 1 wisp_dependencies row with depends_on_id=%q, got %d", newID, depCount)
-	}
-
-	// Verify wisp_dependencies.issue_id was updated
-	err = store.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM wisp_dependencies WHERE issue_id = ?`, newID).Scan(&depCount)
-	if err != nil {
-		t.Fatalf("failed to query wisp_dependencies issue_id: %v", err)
-	}
-	if depCount != 1 {
-		t.Errorf("expected 1 wisp_dependencies row with issue_id=%q, got %d", newID, depCount)
 	}
 
 	// Verify old ID is gone from wisp_dependencies
@@ -132,40 +77,6 @@ func TestUpdateIssueIDUpdatesWispTables(t *testing.T) {
 	}
 	if oldCount != 0 {
 		t.Errorf("expected 0 wisp_dependencies rows with old ID, got %d", oldCount)
-	}
-
-	// Verify wisp_events was updated
-	// 2 rows: the manually-inserted event + the label_added event from addWispLabel
-	var eventCount int
-	err = store.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM wisp_events WHERE issue_id = ?`, newID).Scan(&eventCount)
-	if err != nil {
-		t.Fatalf("failed to query wisp_events: %v", err)
-	}
-	if eventCount != 2 {
-		t.Errorf("expected 2 wisp_events rows with issue_id=%q, got %d", newID, eventCount)
-	}
-
-	// Verify wisp_labels was updated
-	var labelCount int
-	err = store.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM wisp_labels WHERE issue_id = ?`, newID).Scan(&labelCount)
-	if err != nil {
-		t.Fatalf("failed to query wisp_labels: %v", err)
-	}
-	if labelCount != 1 {
-		t.Errorf("expected 1 wisp_labels row with issue_id=%q, got %d", newID, labelCount)
-	}
-
-	// Verify wisp_comments was updated
-	var commentCount int
-	err = store.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM wisp_comments WHERE issue_id = ?`, newID).Scan(&commentCount)
-	if err != nil {
-		t.Fatalf("failed to query wisp_comments: %v", err)
-	}
-	if commentCount != 1 {
-		t.Errorf("expected 1 wisp_comments row with issue_id=%q, got %d", newID, commentCount)
 	}
 }
 

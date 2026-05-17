@@ -288,22 +288,186 @@ func GetReadyWorkInTx(
 		}
 	}
 
-	// When IncludeEphemeral is set, also query the wisps table.
-	if filter.IncludeEphemeral {
-		ephTrue := true
-		wispFilter := types.IssueFilter{Limit: filter.Limit, Ephemeral: &ephTrue}
-		if filter.Status != "" {
-			s := filter.Status
-			wispFilter.Status = &s
+	wisps, wErr := getReadyWispsInTx(ctx, tx, filter)
+	if wErr != nil {
+		return nil, wErr
+	}
+	if len(wisps) > 0 {
+		seen := make(map[string]struct{}, len(ordered))
+		for _, issue := range ordered {
+			seen[issue.ID] = struct{}{}
 		}
-		wisps, wErr := SearchIssuesInTx(ctx, tx, "", wispFilter)
-		if wErr != nil {
-			return nil, fmt.Errorf("search wisps (ready work): %w", wErr)
+		for _, wisp := range wisps {
+			if _, exists := seen[wisp.ID]; exists {
+				continue
+			}
+			ordered = append(ordered, wisp)
 		}
-		ordered = append(ordered, wisps...)
+		sortReadyIssues(ordered, filter.SortPolicy)
+		if filter.Limit > 0 && len(ordered) > filter.Limit {
+			ordered = ordered[:filter.Limit]
+		}
 	}
 
 	return ordered, nil
+}
+
+func getReadyWispsInTx(ctx context.Context, tx *sql.Tx, filter types.WorkFilter) ([]*types.Issue, error) {
+	wispFilter := readyWorkWispFilter(filter)
+	wisps, err := searchTableInTx(ctx, tx, "", wispFilter, WispsFilterTables)
+	if err != nil {
+		if isTableNotExistError(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("search wisps (ready work): %w", err)
+	}
+	if len(wisps) == 0 {
+		return nil, nil
+	}
+
+	now := time.Now().UTC()
+	filtered := wisps[:0]
+	for _, wisp := range wisps {
+		if !filter.IncludeDeferred && wisp.DeferUntil != nil && wisp.DeferUntil.After(now) {
+			continue
+		}
+		filtered = append(filtered, wisp)
+	}
+	if len(filtered) == 0 {
+		return nil, nil
+	}
+
+	ids := make([]string, len(filtered))
+	for i, wisp := range filtered {
+		ids[i] = wisp.ID
+	}
+	blockedIDs, err := ComputeBlockedCandidateIDsInTx(ctx, tx, ids, true)
+	if err != nil {
+		return nil, fmt.Errorf("get ready wisps: filter blocked candidates: %w", err)
+	}
+	if len(blockedIDs) == 0 {
+		return filtered, nil
+	}
+	blockedSet := make(map[string]struct{}, len(blockedIDs))
+	for _, id := range blockedIDs {
+		blockedSet[id] = struct{}{}
+	}
+	ready := filtered[:0]
+	for _, wisp := range filtered {
+		if _, blocked := blockedSet[wisp.ID]; blocked {
+			continue
+		}
+		ready = append(ready, wisp)
+	}
+	return ready, nil
+}
+
+func readyWorkWispFilter(filter types.WorkFilter) types.IssueFilter {
+	wispFilter := types.IssueFilter{
+		Priority:       filter.Priority,
+		Assignee:       filter.Assignee,
+		Labels:         filter.Labels,
+		LabelsAny:      filter.LabelsAny,
+		ExcludeLabels:  filter.ExcludeLabels,
+		Limit:          filter.Limit,
+		Pinned:         boolPtr(false),
+		NoAssignee:     filter.Unassigned,
+		ParentID:       filter.ParentID,
+		MolType:        filter.MolType,
+		WispType:       filter.WispType,
+		MetadataFields: filter.MetadataFields,
+		HasMetadataKey: filter.HasMetadataKey,
+	}
+	if filter.Status != "" {
+		status := filter.Status
+		wispFilter.Status = &status
+	} else {
+		wispFilter.Statuses = []types.Status{types.StatusOpen, types.StatusInProgress}
+	}
+	if filter.Type != "" {
+		issueType := types.IssueType(filter.Type)
+		wispFilter.IssueType = &issueType
+	} else {
+		wispFilter.ExcludeTypes = defaultReadyExcludeTypes(filter.ExcludeTypes)
+	}
+	if filter.MoleculeID != "" {
+		moleculeID := filter.MoleculeID
+		wispFilter.ParentID = &moleculeID
+	}
+	if !filter.IncludeEphemeral {
+		wispFilter.Ephemeral = boolPtr(false)
+	}
+	return wispFilter
+}
+
+func defaultReadyExcludeTypes(extra []types.IssueType) []types.IssueType {
+	excludeTypes := []types.IssueType{
+		"merge-request",
+		"gate",
+		"molecule",
+		"message",
+		"agent",
+		"role",
+		"rig",
+	}
+	seen := make(map[types.IssueType]bool, len(excludeTypes)+len(extra))
+	for _, t := range excludeTypes {
+		seen[t] = true
+	}
+	for _, t := range extra {
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		excludeTypes = append(excludeTypes, t)
+	}
+	return excludeTypes
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func sortReadyIssues(issues []*types.Issue, policy types.SortPolicy) {
+	recentCutoff := time.Now().UTC().Add(-48 * time.Hour)
+	sort.SliceStable(issues, func(i, j int) bool {
+		a, b := issues[i], issues[j]
+		switch policy {
+		case types.SortPolicyOldest:
+			return issueCreatedBefore(a, b)
+		case types.SortPolicyPriority:
+			return issuePriorityBefore(a, b)
+		case types.SortPolicyHybrid, "":
+			aRecent := !a.CreatedAt.Before(recentCutoff)
+			bRecent := !b.CreatedAt.Before(recentCutoff)
+			if aRecent != bRecent {
+				return aRecent
+			}
+			if aRecent && a.Priority != b.Priority {
+				return a.Priority < b.Priority
+			}
+			return issueCreatedBefore(a, b)
+		default:
+			return issuePriorityBefore(a, b)
+		}
+	})
+}
+
+func issuePriorityBefore(a, b *types.Issue) bool {
+	if a.Priority != b.Priority {
+		return a.Priority < b.Priority
+	}
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		return a.CreatedAt.After(b.CreatedAt)
+	}
+	return a.ID < b.ID
+}
+
+func issueCreatedBefore(a, b *types.Issue) bool {
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		return a.CreatedAt.Before(b.CreatedAt)
+	}
+	return a.ID < b.ID
 }
 
 func readyWorkPageSize(limit int) int {
