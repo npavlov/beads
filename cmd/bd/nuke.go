@@ -33,8 +33,9 @@ var nukeCmd = &cobra.Command{
 	GroupID: "maint",
 	Short:   "WIPE all issues, deps, comments, events, wisps (schema/config preserved)",
 	Long: `Permanently delete every row from the user-data tables: issues, dependencies,
-comments, events, labels, blocked_issues, ready_issues, custom_*, wisps and
-their satellites, routes, interactions, federation_peers, snapshots, counters.
+comments, events, labels, custom_*, wisps and their satellites, routes,
+interactions, federation_peers, snapshots, counters. Views (blocked_issues,
+ready_issues) are derived from base tables and clear automatically.
 
 Preserved: schema_migrations, ignored_schema_migrations, local_metadata, config.
 
@@ -127,7 +128,10 @@ func init() {
 }
 
 func listWipeableTables(ctx context.Context, db *sql.DB) ([]string, error) {
-	rows, err := db.QueryContext(ctx, "SHOW TABLES")
+	// SHOW FULL TABLES returns (name, table_type) — table_type is "BASE TABLE"
+	// or "VIEW". We skip views (e.g., blocked_issues, ready_issues) because
+	// they don't support DELETE FROM.
+	rows, err := db.QueryContext(ctx, "SHOW FULL TABLES")
 	if err != nil {
 		return nil, err
 	}
@@ -135,9 +139,12 @@ func listWipeableTables(ctx context.Context, db *sql.DB) ([]string, error) {
 
 	var tables []string
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var name, tableType string
+		if err := rows.Scan(&name, &tableType); err != nil {
 			return nil, err
+		}
+		if !strings.EqualFold(tableType, "BASE TABLE") {
+			continue
 		}
 		if _, preserved := nukePreservedTables[name]; preserved {
 			continue

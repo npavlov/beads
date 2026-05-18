@@ -72,7 +72,7 @@ endif
 #   make gascity-fast-build FAST_TAG=v8         # bump tag
 #   make gascity-fast-build FAST_INSTALL_DIR=~/.local/bin
 FAST_BASE_VERSION ?= 1.0.4-fast
-FAST_TAG ?= v7
+FAST_TAG ?= v9
 FAST_INSTALL_DIR ?= /opt/homebrew/bin
 FAST_BINARY_NAME ?= bd-main
 gascity-fast-build:
